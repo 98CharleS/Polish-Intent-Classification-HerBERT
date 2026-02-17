@@ -1,0 +1,385 @@
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, f1_score, classification_report
+import torch
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, TrainingArguments, Trainer
+from datasets import Dataset
+
+
+# --- 1. Data Generation and Preparation ---
+
+def generate_polish_data():
+    # Creates a sample dataset for 13 intents in Polish
+    data = []
+
+    intent_examples = {
+        "zapytanie_o_pogode": [
+            "Jaka będzie pogoda jutro w Krakowie?",
+            "Czy dziś po południu będzie burza?",
+            "Podaj dokładną prognozę na najbliższe 3 dni.",
+            "Czy w weekend będzie słonecznie?",
+            "Jakie są temperatury na najbliższe godziny?",
+            "Czy dziś będzie silny wiatr?",
+            "Kiedy ustąpią opady śniegu?",
+            "Czy warto dziś wziąć parasol?",
+            "Prognoza temperatury na noc.",
+            "Czy nadchodzą jakieś alerty pogodowe?"
+        ],
+        "zamowienie_jedzenia": [
+            "Zamów burgera z frytkami.",
+            "Chcę dużą margheritę na cienkim cieście.",
+            "Poproszę ramen z wołowiną.",
+            "Zamów zestaw sushi dla dwóch osób.",
+            "Chcę coś ostrego z kuchni indyjskiej.",
+            "Proszę o kebaba z baraniną.",
+            "Zamów jedzenie z najbliższej pizzerii.",
+            "Poproszę sałatkę cezar.",
+            "Chcę coś wegańskiego na szybko.",
+            "Zamów makaron carbonara."
+        ],
+        "rezerwacja_taksowki": [
+            "Zamów taksówkę pod mój adres za 15 minut.",
+            "Potrzebuję transportu do pracy.",
+            "Proszę kurs na lotnisko Chopina.",
+            "Zamów przejazd na ulicę Wiosenną 12.",
+            "Poproszę duży samochód dla 5 osób.",
+            "Potrzebuję taksówki na już.",
+            "Taxi pod centrum handlowe.",
+            "Zarezerwuj transport na godzinę 20:00.",
+            "Proszę o najtańszą dostępną opcję.",
+            "Potrzebuję kierowcy mówiącego po angielsku."
+        ],
+        "ustawienie_przypomnienia": [
+            "Przypomnij mi o treningu o 19:00.",
+            "Ustaw przypomnienie, żeby kupić mleko.",
+            "Za godzinę przypomnij mi o praniu.",
+            "Przypomnij jutro rano o zadzwonieniu do dentysty.",
+            "Ustaw alarm o szóstej.",
+            "Przypomnij o spotkaniu z klientem.",
+            "Za 30 minut przypomnij o przerwie.",
+            "Przypomnij o odebraniu paczki.",
+            "Przypomnij, żebym wysłał raport.",
+            "Ustaw przypomnienie na poniedziałek o 10:00."
+        ],
+        "pytanie_o_godziny_otwarcia": [
+            "Do której otwarty jest Lidl?",
+            "Kiedy działa najbliższy paczkomat?",
+            "Godziny pracy apteki całodobowej.",
+            "O której otwierają pocztę?",
+            "Do której czynna jest moja siłownia?",
+            "Jak długo dziś otwarta jest restauracja?",
+            "Kiedy otwierają muzeum narodowe?",
+            "Czy dziś urząd jest czynny?",
+            "Do której otwarty jest sklep zoologiczny?",
+            "Kiedy mogę odwiedzić bibliotekę?"
+        ],
+        "informacje_o_koncie": [
+            "Pokaż historię transakcji z tego tygodnia.",
+            "Ile mam środków na koncie oszczędnościowym?",
+            "Czy przyszła wypłata?",
+            "Pokaż ostatni przelew przychodzący.",
+            "Jaki jest mój limit na karcie?",
+            "Pokaż wszystkie transakcje kartą z dziś.",
+            "Czy opłata za subskrypcję została pobrana?",
+            "Ile mam dostępnych środków?",
+            "Pokaż saldo konta głównego.",
+            "Czy mój ostatni przelew został zrealizowany?"
+        ],
+        "zmiana_muzyki": [
+            "Włącz spokojną muzykę do pracy.",
+            "Puść playlistę na imprezę.",
+            "Wycisz muzykę.",
+            "Zatrzymaj odtwarzanie.",
+            "Włącz ulubiony album.",
+            "Puść coś z lat 80.",
+            "Zmień na radiostację z rockiem.",
+            "Przewiń o minutę do przodu.",
+            "Zwiększ głośność.",
+            "Włącz losowe odtwarzanie."
+        ],
+        "wykonanie_obliczenia": [
+            "Oblicz 120 * 45.",
+            "Ile to jest 560 / 8?",
+            "Policz pierwiastek z 256.",
+            "Ile to jest 12 do potęgi 4?",
+            "Oblicz średnią z liczb 3, 10 i 17.",
+            "Jaki jest wynik 99 + 101?",
+            "Policz obwód koła o promieniu 5.",
+            "Jaki jest wynik 45 - 19?",
+            "Policz procent: ile to 15% z 240?",
+            "Przelicz 2,5 metra na centymetry."
+        ],
+        "pytanie_o_definicje": [
+            "Co oznacza pojęcie neuron w AI?",
+            "Wyjaśnij, czym jest sieć neuronowa.",
+            "Podaj definicję algorytmu.",
+            "Co to jest fotosynteza?",
+            "Wyjaśnij termin paradygmat programowania.",
+            "Co oznacza pojęcie inflacja?",
+            "Podaj definicję grawitacji.",
+            "Co to jest API?",
+            "Wyjaśnij pojęcie blockchain.",
+            "Co oznacza termin hipoteza?"
+        ],
+        "przywitanie": [
+            "Cześć!",
+            "Hej, co słychać?",
+            "Siema!",
+            "Dzień dobry!",
+            "Witam!",
+            "Dobry wieczór!",
+            "Hejka!",
+            "Miło cię słyszeć!",
+            "Co tam?",
+            "Halo!"
+        ],
+        "wyszukiwanie_elektroniki": [
+            "Jaki laptop do 4000 zł warto kupić?",
+            "Najlepszy telefon do zdjęć w 2025.",
+            "Poleć komputer do gier.",
+            "Porównaj modele iPhone 15 i Samsung S24.",
+            "Jaką kartę graficzną kupić do AI?",
+            "Który monitor jest najlepszy do pracy biurowej?",
+            "Poleć słuchawki z ANC.",
+            "Jaki smartwatch ma najlepszą baterię?",
+            "Najlepsze słuchawki do biegania.",
+            "Poleć dobry telewizor 55 cali."
+        ],
+        "literatura": [
+            "Streszczenie 'Lalki' Prusa.",
+            "Charakterystyka Stanisława Wokulskiego.",
+            "Opis Balladyny z dramatu Słowackiego.",
+            "Analiza motywu zemsty w 'Hamlecie'.",
+            "Interpretacja wiersza 'Kot w pustym mieszkaniu'.",
+            "Co symbolizuje chochoł w 'Weselu'?",
+            "Omów narrację w 'Ferdydurke'.",
+            "Jaki jest główny temat 'Zbrodni i kary'?",
+            "Charakterystyka Izabeli Łęckiej.",
+            "Streszczenie mitu o Prometeuszu."
+        ],
+        "gotowanie": [
+            "Przepis na naleśniki.",
+            "Jak zrobić rosół?",
+            "Przepis na szybkie spaghetti.",
+            "Jak upiec kurczaka w piekarniku?",
+            "Przepis na omlet.",
+            "Jak zrobić pizzę w domu?",
+            "Szybki deser bez pieczenia.",
+            "Przepis na tosty francuskie.",
+            "Jak ugotować jajka na miękko?",
+            "Przepis na zupę krem z dyni."
+        ]
+    }
+
+    # Expand the dataset to have more samples
+    for intent, examples in intent_examples.items():
+        for example in examples:
+            for _ in range(5):  # Duplicate examples to increase data volume for this demo
+                data.append({'text': example, 'intent': intent})
+
+    return pd.DataFrame(data)
+
+
+df = generate_polish_data()
+
+# Create label mapping (intents to integers)
+unique_intents = df['intent'].unique()
+label_to_id = {label: i for i, label in enumerate(unique_intents)}
+id_to_label = {i: label for label, i in label_to_id.items()}
+
+# Apply mapping to DataFrame
+df['label'] = df['intent'].apply(lambda x: label_to_id[x])
+
+# Split data into training and testing sets
+train_df, test_df = train_test_split(df, test_size=0.2, random_state=42, stratify=df['label'])
+
+# Convert DataFrame to Hugging Face Dataset format
+train_dataset = Dataset.from_pandas(train_df[['text', 'label']])
+test_dataset = Dataset.from_pandas(test_df[['text', 'label']])
+
+print(f"Number of training samples: {len(train_dataset)}")
+print(f"Number of testing samples: {len(test_dataset)}")
+print("-" * 30)
+
+# --- 2. Model and Tokenizer Initialization ---
+
+# Using HerBERT - a Polish RoBERTa-based model
+MODEL_NAME = "allegro/herbert-base-cased"
+NUM_LABELS = len(unique_intents)
+
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+model = AutoModelForSequenceClassification.from_pretrained(
+    MODEL_NAME,
+    num_labels=NUM_LABELS,
+    id2label=id_to_label,
+    label2id=label_to_id
+)
+
+
+# Tokenization function
+def tokenize_function(examples):
+    return tokenizer(examples['text'], truncation=True, padding='max_length', max_length=128)
+
+
+# Apply tokenization
+tokenized_train_dataset = train_dataset.map(tokenize_function, batched=True)
+tokenized_test_dataset = test_dataset.map(tokenize_function, batched=True)
+
+# Set PyTorch format
+tokenized_train_dataset.set_format(type="torch", columns=["input_ids", "attention_mask", "label"])
+tokenized_test_dataset.set_format(type="torch", columns=["input_ids", "attention_mask", "label"])
+
+
+# --- 3. Training Configuration and Fine-Tuning ---
+
+# Metrics function for model evaluation
+def compute_metrics(eval_pred):
+    logits, labels = eval_pred
+    predictions = torch.argmax(torch.tensor(logits), dim=-1).numpy()
+
+    # Calculate metrics
+    accuracy = accuracy_score(labels, predictions)
+    f1_macro = f1_score(labels, predictions, average='macro')
+
+    return {"accuracy": accuracy, "f1_macro": f1_macro}
+
+
+# Training arguments
+training_args = TrainingArguments(
+    output_dir="./results",
+    num_train_epochs=3,  # Number of epochs
+    per_device_train_batch_size=8,  # Batch size
+    per_device_eval_batch_size=8,
+    warmup_steps=50,  # Warmup steps
+    weight_decay=0.01,  # Regularization
+    logging_dir='./logs',
+    logging_steps=10,
+    eval_strategy="epoch",  # Evaluation after each epoch
+    save_strategy="epoch",  # Save model after each epoch
+    load_best_model_at_end=True,  # Load the best model at the end
+    metric_for_best_model="f1_macro",  # Metric to determine the best model
+)
+
+# Initialize Trainer
+trainer = Trainer(
+    model=model,
+    args=training_args,
+    train_dataset=tokenized_train_dataset,
+    eval_dataset=tokenized_test_dataset,
+    compute_metrics=compute_metrics,
+)
+
+# Start Fine-Tuning
+print("Starting HerBERT Fine-Tuning...")
+trainer.train()
+
+# --- 4. Model Evaluation and Results ---
+
+print("-" * 30)
+print("Evaluation on test set:")
+evaluation_results = trainer.evaluate()
+print(evaluation_results)
+
+# Full classification report
+test_predictions = trainer.predict(tokenized_test_dataset)
+predicted_labels_id = torch.argmax(torch.tensor(test_predictions.predictions), dim=-1).numpy()
+true_labels_id = test_dataset['label']
+
+predicted_labels_intent = [id_to_label[id] for id in predicted_labels_id]
+true_labels_intent = [id_to_label[id] for id in true_labels_id]
+
+print("\n--- Full Classification Report (Scikit-learn) ---")
+print(classification_report(true_labels_intent, predicted_labels_intent, zero_division=0))
+print("-" * 30)
+
+
+# --- 5. Simple Testing Function (Interface) ---
+
+def predict_intent(text):
+    # Predicts intent for a new utterance
+    inputs = tokenizer(text, return_tensors="pt", truncation=True, padding='max_length', max_length=128)
+
+    # Enable evaluation mode
+    model.eval()
+
+    with torch.no_grad():
+        outputs = model(**inputs)
+        logits = outputs.logits
+        predicted_class_id = torch.argmax(logits, dim=-1).item()
+
+    return id_to_label[predicted_class_id]
+
+
+# Test examples
+print("--- Testing the trained model ---")
+test_phrases = [
+    # greeting
+    "Hej, miło cię widzieć!",
+    "Dzień dobry, jak mogę pomóc?",
+    "Witam ponownie!",
+
+    # weather_query
+    "Czy jutro będzie słonecznie w Gdańsku?",
+    "Jaka jest prognoza na popołudnie?",
+    "Czy dzisiaj przewidują burze?",
+
+    # opening_hours_query
+    "Do której czynny jest dziś market?",
+    "O której otwierają aptekę?",
+    "Jakie są godziny pracy biblioteki miejskiej?",
+
+    # change_music
+    "Włącz moją playlistę do biegania.",
+    "Zatrzymaj aktualny utwór.",
+    "Przewiń do kolejnej piosenki.",
+
+    # set_reminder
+    "Przypomnij mi o spotkaniu za 10 minut.",
+    "Ustaw alarm na jutro na 6:30.",
+    "Powiadom mnie o odebraniu przesyłki.",
+
+    # electronics_search
+    "Poleć laptop do pracy zdalnej.",
+    "Jaki smartfon ma najlepszą baterię?",
+    "Które słuchawki douszne warto kupić?",
+
+    # definition_query
+    "Co oznacza skrót API?",
+    "Wyjaśnij pojęcie 'algorytm'.",
+    "Na czym polega uczenie nadzorowane?",
+
+    # calculation
+    "Ile to jest 45 * 7?",
+    "Policz 20% z 350.",
+    "Jaki jest wynik 144 podzielone na 12?",
+
+    # account_info
+    "Pokaż ostatnie transakcje.",
+    "Czy wpłata została zaksięgowana?",
+    "Ile mam dostępnych środków na koncie?",
+
+    # taxi_booking
+    "Zamów taksówkę pod mój adres.",
+    "Potrzebuję transportu za 5 minut.",
+    "Zarezerwuj przejazd na ulicę Zieloną 14.",
+
+    # food_ordering
+    "Zamów dwie pizze pepperoni.",
+    "Poproszę zestaw sushi.",
+    "Chcę coś wegańskiego na dowóz.",
+
+    # literature
+    "Streszcz 'Pana Tadeusza'.",
+    "Kim jest główny bohater 'Lalki'?",
+    "O czym opowiada 'Dziady' część II?",
+
+    # cooking
+    "Jak zrobić jajecznicę?",
+    "Podaj prosty przepis na makaron.",
+    "Jak upiec ciasto czekoladowe?"
+]
+
+
+for phrase in test_phrases:
+    intent = predict_intent(phrase)
+    print(f"Utterance: '{phrase}' -> Intent: **{intent}**")
